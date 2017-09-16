@@ -1,0 +1,204 @@
+---
+title: "ML_PeerAssignment1"
+author: "Prashanth D"
+date: "Aug 21, 2017"
+output: html_document
+---
+
+## Overview
+
+This is the final report for the peer graded assignment of coursera's Practical Machine Learning course part of Data Specialization. 
+This analysis meant to be the basis for the course quiz and a prediction assignment writeup. The main goal of the project is to predict the manner in which 6 participants performed some exercise as described below. This is the "classe" variable in the training set. The machine learning algorithm described here is applied to the 20 test cases available in the test data and the predictions are submitted in appropriate format to the Course Project Prediction Quiz for automated grading
+
+### I. Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+### II. Preparatory Activities
+
+#### a. Dataset Overview
+
+The training datset for this assignment is sourced from the below link:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data fro this assignment is sourced from the below link:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from http://groupware.les.inf.puc-rio.br/har. Full source:
+
+**Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. "Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13)". Stuttgart, Germany: ACM SIGCHI, 2013.**
+
+I thank the above mentioned authors for making this available for this assignment
+
+**A short description of the datasets content from the authors' website:**
+
+"Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. Participants were supervised by an experienced weight lifter to make sure the execution complied to the manner they were supposed to simulate. The exercises were performed by six male participants aged between 20-28 years, with little weight lifting experience. We made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg)."
+
+#### b. Environment Preparation
+
+
+```{r, echo=TRUE}
+
+library(caret)
+library(knitr)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(e1071)
+
+```
+
+#### c. Data Loading and Cleaning
+
+The data sets mentioned from the above links are downloaded into the working directory. The training dataset is split into two subsets - trainSet (70% of the data) and testSet (30% of the data). The testing set provided by the above url is used only predicting the result for the quiz questions.
+
+For cleaning the dataset, non zero variance variables are removed. In addition to this, only the columns which have less than 60% of their values as NA are selected. First 5 columns of the datasets are removed since these are not relevant to prediction
+
+```{r, echo=TRUE}
+
+wd_dir <- "D:/Data/Official/coursera/DataScience/MachineLearning/PA"
+setwd(wd_dir)
+training <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+dim(training)
+dim(testing)
+
+# split training dataset into two subsets for training and testing models
+
+set.seed(1234)
+inTrain <- createDataPartition(y=training$classe,p=0.7,list=FALSE)
+trainSet <- training[inTrain,]
+testSet <- training[-inTrain,]
+dim(trainSet)
+dim(testSet)
+
+# remove variables with near zero variance
+
+nzv <- nearZeroVar(trainSet)
+trainSet <- trainSet[,-nzv]
+testSet <- testSet[,-nzv]
+
+# select only variables that have less than 60% NAs 
+
+trainSet <- trainSet[,colSums(is.na(trainSet)) < nrow(trainSet) * 0.6]
+testSet <- testSet[,colSums(is.na(testSet)) < nrow(testSet) * 0.6]
+
+# remove the first five columns that are not relevant to prediction
+
+trainSet <- trainSet[,-c(1:5)]
+testSet <- testSet[,-c(1:5)]
+dim(trainSet)
+dim(testSet)
+
+```
+### III. Prediction Model Building
+
+In total 4 models will be applied to trainSet and one with highest accuracy will be selected for predicting outcomes for the 20 samples provided in the testing data set.
+
+The 4 models that will be tried out are: 
+* Decsion Tress
+* Decision Trees with Cross Validation
+* Randon Forest
+* Generalized Boosting Model
+
+Each of these models will constructed using trainSet and a confusion matrix will be created using the trainSet. The accuracy given by the confusion matrix will be used for selectiing the final model
+
+**Model: Decision Tree**
+
+``` {r, echo=TRUE}
+
+modFitTree <- rpart(classe ~.,data=trainSet,method="class", control=rpart.control(minibucket=25))
+print(modFitTree$finalModel)
+prp(modFitTree)
+## prediction for testSet
+predictTree <- predict(modFitTree,newdata=testSet, type="class")
+confMatTree <- confusionMatrix(predictTree,testSet$classe)
+confMatTree
+
+```
+
+**Model: Decision Tree with Cross Validation**
+
+Using CV with 10 folds and using train function to determine the best cp value
+
+``` {r, echo=TRUE}
+
+## performing cross validation with 10 folds
+
+fitControl = trainControl(method="cv",number=10)
+
+## creating cp grid for evaluating the cp value which yields highest accuracy
+
+cartGrid = expand.grid(.cp=(1:50)*0.0001)
+cvTrain = train(classe~.,method="rpart",data=trainSet,
+                trControl=fitControl,tuneGrid=cartGrid)
+cvTrain
+
+## using the cp value of 0.0001 since that yields the highest accuracy
+modFitCVTree = rpart(classe~.,method="class",data=trainSet,
+                     control=rpart.control(cp=0.0001))
+
+## prediction for testSet
+
+predictCVTree <- predict(modFitCVTree,newdata=testSet, type="class")
+confMatCVTree <- confusionMatrix(predictCVTree,testSet$classe)
+confMatCVTree
+
+```
+
+**Model: Random Forest with CV**
+
+Building a random forest model with CV - 10 folds
+
+```{r, echo=TRUE}
+modFitRF <- train(classe ~.,data=trainSet,method="rf", importance = T, trControl = trainControl(method = "cv", number = 10))
+
+print(modFitRF$finalModel)
+## prediction for testSet
+predictRF <- predict(modFitRF,testSet)
+confMatRF <- confusionMatrix(predictRF,testSet$classe)
+confMatRF
+plot(modFitRF, ylim = c(0.9, 1))
+
+```
+
+**Model: Boosting with CV**
+
+Boosting algorithm with cross validation - 10 folds
+
+``` {r, echo=TRUE}
+
+modFitBoost <- train(classe ~.,data=trainSet,method="gbm", verbose = FALSE, trControl = trainControl(method = "cv", number = 10))
+
+print(modFitBoost$finalModel)
+## prediction for testSet
+predictBoost <- predict(modFitBoost,testSet)
+confMatBoost <- confusionMatrix(predictBoost,testSet$classe)
+confMatBoost
+plot(modFitBoost, ylim = c(0.9, 1))
+
+```
+
+### IV. Final Model Selection
+
+**Comparing the accuracies of all the four models**
+
+** Accuracy: Decision Tree ** `r round(confMatTree$overall['Accuracy'], 4)`
+** Accuracy: Decision Tree Model with CV ** `r round(confMatCVTree$overall['Accuracy'], 4)`
+
+** Accuracy: RF Model ** `r round(confMatRF$overall['Accuracy'], 4)`
+
+** Accuracy: Boosting Model ** `r round(confMatBoost$overall['Accuracy'], 4)`
+
+Based on the above results, we select Random Forest Model for predicting the results of the testing data set
+
+### V. Applying the selected model to the test data to predict quiz results
+
+``` {r, echo=TRUE}
+predictTest <- predict(modFitRF,newdata=testing)
+predictTest
+
+```
